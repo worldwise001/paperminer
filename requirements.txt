@@ -12,7 +12,7 @@ jsonpatch==1.16
 jsonpointer==1.10
 jsonschema==2.6.0
 MarkupSafe==1.0
-PyYAML==3.12
+PyYAML==5.1
 requests==2.18.4
 requests-unixsocket==0.1.5
 service-identity==16.0.0
