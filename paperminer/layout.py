@@ -1,5 +1,5 @@
-from pdfminer.layout import LTTextContainer, LTContainer, LTAnno, LTTextBoxVertical, IndexAssigner, LTChar, \
-    LTTextGroupLRTB, LTTextGroupTBRL, LTTextBoxHorizontal, LTTextLineHorizontal, LTTextLineVertical
+from pdfminer.layout import LTContainer, LTTextLineHorizontal, LTTextLineVertical, LTTextContainer, LTAnno, LTChar, \
+    IndexAssigner, LTTextBoxVertical, LTTextGroupTBRL, LTTextGroupLRTB, LTTextBoxHorizontal
 from pdfminer.utils import bbox2str, get_bound, apply_matrix_pt, matrix2str, fsplit, Plane, uniq
 
 from sortedcontainers import SortedListWithKey

@@ -2,10 +2,13 @@
 ##  PDFLayoutAnalyzer
 ##
 import logging
+import sys
 import traceback
 
 import six
-from pdfminer.layout import LTPage, LTFigure, LTImage, LTLine, LTRect, LTCurve, LTChar
+from pdfminer import utils
+from pdfminer.layout import LTPage, LTFigure, LTImage, LTLine, LTRect, LTCurve, LTChar, LTTextLineHorizontal, \
+    LTContainer, LTAnno, LAParams
 from pdfminer.pdfdevice import PDFTextDevice
 from pdfminer.pdffont import PDFUnicodeNotDefined
 from pdfminer.utils import apply_matrix_pt, mult_matrix
@@ -98,7 +101,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
 
     def render_char(self, matrix, font, fontsize, scaling, rise, cid, ncs, graphicstate):
         if self.printed == 0:
-            traceback.print_stack()
+            # traceback.print_stack()
             self.printed = 1
         try:
             text = font.to_unichr(cid)
@@ -116,4 +119,55 @@ class PDFLayoutAnalyzer(PDFTextDevice):
         return '(cid:%d)' % cid
 
     def receive_layout(self, ltpage):
+        return
+
+class TestConverter(PDFLayoutAnalyzer):
+    def __init__(self, rsrcmgr, pageno=1):
+        laparams = LAParams()
+        for param in ("all_texts", "detect_vertical", "word_margin", "char_margin", "line_margin", "boxes_flow"):
+            paramv = locals().get(param, None)
+            if paramv is not None:
+                setattr(laparams, param, paramv)
+        PDFLayoutAnalyzer.__init__(self, rsrcmgr, pageno=pageno, laparams=laparams)
+        return
+
+    @staticmethod
+    def write_text(text):
+        text = utils.compatible_encode_method(text, 'utf-8', 'ignore')
+        #if six.PY3:
+        #    text = text.encode()
+        # sys.stdout.write(text)
+        return
+
+    # a typical page is 612 x 792 in pts or 8.5 x 11 in inches
+    # some common margin conversions: 1in = 72 pts, 0.5in = 36 pts
+    # LaTeX margins are probably going to be between 36-72pts
+    # anything drawn in the first 0.25 - 0.5 of the page is possibly a title + authors
+    # So that is 0 - [198-396] pts
+    def receive_layout(self, ltpage):
+        def render(item, parent, level):
+            if not isinstance(item, LTChar) and not isinstance(item, LTAnno):
+                sparent = parent.__class__.__name__ or 'root'
+                print(f'{"".join([" "] * level)} -> {item.__class__.__name__} {item.y1 if isinstance(item, LTPage) else ""}')
+            if isinstance(item, LTTextLineHorizontal):
+                self.write_text(f'{"".join([" "] * level)}      ')
+                print(f'{"".join([" "] * level)}      ' + str(item.x0))
+                for child in item:
+                    self.write_text(child.get_text())
+            elif isinstance(item, LTContainer):
+                for child in item:
+                    render(child, item, level + 1)
+            '''
+            if isinstance(item, LTChar) or isinstance(item, LTAnno):
+                self.write_text(item.get_text())
+            elif isinstance(item, LTTextLineHorizontal):
+                child = list(item)[0]
+                self.write_text(child.fontname + ' ' + '%0.5f' % child.size + '\n') # font
+            elif isinstance(item, LTTextBoxHorizontal):
+                self.write_text('\n')
+            elif isinstance(item, LTImage):
+                # do image stuff
+                pass
+            '''
+        render(ltpage, None, 0)
         return

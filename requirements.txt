@@ -1,5 +1,5 @@
 PyPDF2
-pdfminer.six==20181108
+pdfminer.six==20191020
 attrs==17.4.0
 certifi==2018.1.18
 cryptography==2.3
