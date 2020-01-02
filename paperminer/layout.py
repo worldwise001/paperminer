@@ -1,12 +1,11 @@
-from pdfminer.layout import LTContainer, LTTextLineHorizontal, LTTextLineVertical, LTTextContainer, LTAnno, \
-    LTChar, LTLayoutContainer
-from pdfminer.utils import bbox2str
+from pdfminer.layout import LTTextLineHorizontal, LTTextLineVertical, LTTextContainer, LTChar, LTLayoutContainer, LTTextBoxVertical, LTTextBoxHorizontal
+from pdfminer.utils import bbox2str, Plane, uniq
 
 
 class LTLayoutContainerExtended(LTLayoutContainer):
-
-    def __init__(self, bbox):
+    def __init__(self, bbox, rsrcmgr = None):
         super().__init__(bbox)
+        self.rsrcmgr = rsrcmgr
         return
 
     # group_objects: group text object to textlines.
@@ -81,6 +80,49 @@ class LTLayoutContainerExtended(LTLayoutContainer):
         yield line
         return
 
+    # group_textlines: group neighboring lines to textboxes.
+    def group_textlines(self, laparams, lines):
+        plane = Plane(self.bbox)
+        plane.extend(lines)
+        boxes = {}
+        for line in lines:
+            if isinstance(line, LTTextLineHorizontalExtended):
+                box = LTTextBoxHorizontal()
+                if self.rsrcmgr:
+                    klass = line.maybe_classify(self.rsrcmgr)
+                    if klass == LTTitle:
+                        self.rsrcmgr.after_title = True
+                    elif not self.rsrcmgr.after_abstract and klass == LTSectionHeader:
+                        self.rsrcmgr.after_abstract = True
+                    box = klass()
+            else:
+                box = LTTextBoxVertical()
+            if not isinstance(box, LTTitle) and not isinstance(box, LTSectionHeader):
+                neighbors = line.find_neighbors_with_rsrcmgr(plane, laparams.line_margin, self.rsrcmgr)
+                if line not in neighbors:
+                    continue
+            else:
+                neighbors = [line]
+            members = []
+            for obj1 in neighbors:
+                members.append(obj1)
+                if obj1 in boxes:
+                    members.extend(boxes.pop(obj1))
+            for obj in uniq(members):
+                box.add(obj)
+                boxes[obj] = box
+        done = set()
+        for line in lines:
+            if line not in boxes:
+                continue
+            box = boxes[line]
+            if box in done:
+                continue
+            done.add(box)
+            if not box.is_empty():
+                yield box
+        return
+
 
 class LTCharExtended(LTChar):
     """Actual letter in the text as a Unicode string."""
@@ -94,8 +136,8 @@ class LTCharExtended(LTChar):
 
 class LTPageExtended(LTLayoutContainerExtended):
 
-    def __init__(self, pageid, bbox, rotate=0):
-        LTLayoutContainerExtended.__init__(self, bbox)
+    def __init__(self, pageid, bbox, rotate=0, rsrcmgr=None):
+        LTLayoutContainerExtended.__init__(self, bbox, rsrcmgr)
         self.pageid = pageid
         self.rotate = rotate
         return
@@ -134,36 +176,62 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
                 right_margin = item.x0
         return right_margin
 
+    def maybe_compare(self, other_line):
+        if not isinstance(other_line, LTTextLineHorizontalExtended):
+            return False
+        if self.get_text().strip() != other_line.get_text().strip():
+            return False
+        if self.bbox != other_line.bbox:
+            return False
+        return True
 
-class LTPageHeader(LTTextContainer):
-    def __init__(self, word_margin):
-        LTTextContainer.__init__(self)
-        self.word_margin = word_margin
-        return
+    def maybe_classify(self, rsrcmgr):
+        if not rsrcmgr:
+            return LTTextBoxHorizontal
+        if self.maybe_compare(rsrcmgr.top_margin_ref):
+            return LTTitle
+        elif rsrcmgr.after_title:
+            if self.maybe_compare(rsrcmgr.abstract_ref):
+                return LTSectionHeader
+            if not rsrcmgr.after_abstract:
+                return LTAuthor
+        return LTTextBoxHorizontal
 
-    def __repr__(self):
-        return ('<%s %s %r>' %
-                (self.__class__.__name__, bbox2str(self.bbox),
-                 self.get_text()))
+    def find_neighbors_with_rsrcmgr(self, plane, ratio, rsrcmgr):
+        d = ratio*self.height
+        objs = plane.find((self.x0, self.y0-d, self.x1, self.y1+d))
+        classification = self.maybe_classify(rsrcmgr)
+        return [obj for obj in objs
+                if (isinstance(obj, LTTextLineHorizontalExtended) and
+                    classification == obj.maybe_classify(rsrcmgr) and
+                    (
+                        (abs(obj.height-self.height) < d and (abs(obj.x0-self.x0) < d or abs(obj.x1-self.x1) < d)) or
+                        classification == LTAuthor
+                    )
+                    )]
 
-    def analyze(self, laparams):
-        LTTextContainer.analyze(self, laparams)
-        LTContainer.add(self, LTAnno('\n'))
-        return
 
-    def find_neighbors(self, plane, ratio):
-        raise NotImplementedError
-
-
-class LTPageFooter(LTTextContainer):
+class LTPageHeader(LTTextBoxHorizontal):
     pass
 
 
-class LTSectionHeader(LTTextContainer):
+class LTPageFooter(LTTextBoxHorizontal):
     pass
 
 
-class LTSectionBody(LTTextContainer):
+class LTTitle(LTTextBoxHorizontal):
+    pass
+
+
+class LTAuthor(LTTextBoxHorizontal):
+    pass
+
+
+class LTSectionHeader(LTTextBoxHorizontal):
+    pass
+
+
+class LTSectionBody(LTTextBoxHorizontal):
     pass
 
 

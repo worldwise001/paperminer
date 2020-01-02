@@ -84,27 +84,25 @@ class ExtendedPaperAnalyzer(BasePaperAnalyzer):
     # So that is 0 - [198-396] pts
     def receive_layout(self, ltpage):
         def render(item, parent, level, rsrcmgr):
-            # if not isinstance(item, LTCharExtended) and not isinstance(item, LTAnno):
-            #    print(f'{"".join([" "] * level)} -> {item.__class__.__name__} {item.y1 if isinstance(item, LTTextLineHorizontalExtended) else ""}')
             if isinstance(item, LTTextLineHorizontalExtended):
-                if rsrcmgr.top_margin_ref is None:
+                if not rsrcmgr.top_margin_ref:
                     rsrcmgr.top_margin_ref = item
                 if item.left_margin < rsrcmgr.left_margin:
                     rsrcmgr.left_margin = item.left_margin
                 if item.right_margin > rsrcmgr.right_margin:
                     rsrcmgr.right_margin = item.right_margin
-                if intro_header_pattern.match(item.get_text()) is not None:
+                if intro_header_pattern.match(item.get_text()):
                     rsrcmgr.intro_ref.append(item)
-                if background_header_pattern.match(item.get_text()) is not None:
+                if background_header_pattern.match(item.get_text()):
                     rsrcmgr.background_ref.append(item)
-                if abstract_header_pattern.match(item.get_text()) is not None and\
+                if not rsrcmgr.abstract_ref and abstract_header_pattern.match(item.get_text()) and\
                         'extended' not in item.get_text().lower():
-                    rsrcmgr.abstract_ref.append(item)
-                if ref_header_pattern.match(item.get_text()) is not None:
+                    rsrcmgr.abstract_ref = item
+                if ref_header_pattern.match(item.get_text()):
                     rsrcmgr.ref_ref.append(item)
-                if figure_pattern.match(item.get_text()) is not None:
+                if figure_pattern.match(item.get_text()):
                     rsrcmgr.figure_ref.append(item)
-                if table_pattern.match(item.get_text()) is not None:
+                if table_pattern.match(item.get_text()):
                     rsrcmgr.table_ref.append(item)
             elif isinstance(item, LTContainer):
                 for child in item:
@@ -124,6 +122,11 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
             interpreter.process_page(page)
         return
 
+    def begin_page(self, page, ctm):
+        super().begin_page(page, ctm)
+        self.cur_item.rsrcmgr = self.rsrcmgr
+        return
+
     @staticmethod
     def write_text(text):
         text = utils.compatible_encode_method(text, 'utf-8', 'ignore')
@@ -131,15 +134,17 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
         return
 
     def receive_layout(self, ltpage):
-        def render(item):
+        def render(item, parent, level):
+            if not isinstance(item, LTCharExtended) and not isinstance(item, LTAnno):
+                print(f'{"".join([" "] * level)} -> {item.__class__.__name__} {item.y1 if isinstance(item, LTTextLineHorizontalExtended) else ""}')
             if isinstance(item, LTTextLineHorizontalExtended):
                 for child in item:
                     self.write_text(child.get_text())
             elif isinstance(item, LTContainer):
                 for child in item:
-                    render(child)
+                    render(child, item, level + 1)
 
-        render(ltpage)
+        render(ltpage, None, 0)
         return
 
     def get_result(self):
@@ -156,11 +161,13 @@ class PaperResourceManager(PDFResourceManager):
         self.background_ref = []
         self.text_ref = []
         self.figure_ref = []
-        self.abstract_ref = []
+        self.abstract_ref = None
         self.table_ref = []
-        self.after_ref = False
         self.ref_ref = []
         self.top_margin_ref = None
         self.left_margin = 612
         self.right_margin = 0
         self.smallest_ref = []
+        self.after_title = False
+        self.after_abstract = False
+        self.after_ref = False
