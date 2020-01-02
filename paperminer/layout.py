@@ -188,10 +188,12 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
     def maybe_classify(self, rsrcmgr):
         if not rsrcmgr:
             return LTTextBoxHorizontal
+        if self._objs[0].y0 > rsrcmgr.top_margin_ref.y1:
+            return LTPageMargin
         if self.maybe_compare(rsrcmgr.top_margin_ref):
             return LTTitle
-        elif rsrcmgr.after_title:
-            if self.maybe_compare(rsrcmgr.abstract_ref):
+        if rsrcmgr.after_title:
+            if rsrcmgr.section_header_font == self.font and rsrcmgr.section_header_font_size == self.fontsize:
                 return LTSectionHeader
             if not rsrcmgr.after_abstract:
                 return LTAuthor
@@ -206,18 +208,14 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
                     classification == obj.maybe_classify(rsrcmgr) and
                     (
                         (abs(obj.height-self.height) < d and (abs(obj.x0-self.x0) < d or abs(obj.x1-self.x1) < d)) or
-                        classification == LTAuthor
+                        classification == LTAuthor or
+                        classification == LTPageMargin
                     )
                     )]
 
 
-class LTPageHeader(LTTextBoxHorizontal):
+class LTPageMargin(LTTextBoxHorizontal):
     pass
-
-
-class LTPageFooter(LTTextBoxHorizontal):
-    pass
-
 
 class LTTitle(LTTextBoxHorizontal):
     pass

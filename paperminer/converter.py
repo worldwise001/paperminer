@@ -5,7 +5,7 @@ import sys
 import six
 from pdfminer import utils
 from pdfminer.converter import PDFLayoutAnalyzer
-from pdfminer.layout import LAParams, LTAnno, LTContainer
+from pdfminer.layout import LAParams, LTAnno, LTContainer, LTTextBoxHorizontal
 from pdfminer.pdffont import PDFUnicodeNotDefined
 from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.pdfpage import PDFPage
@@ -92,14 +92,16 @@ class ExtendedPaperAnalyzer(BasePaperAnalyzer):
                 if item.right_margin > rsrcmgr.right_margin:
                     rsrcmgr.right_margin = item.right_margin
                 if intro_header_pattern.match(item.get_text()):
-                    rsrcmgr.intro_ref.append(item)
+                    rsrcmgr.section_header_ref.append(item)
                 if background_header_pattern.match(item.get_text()):
-                    rsrcmgr.background_ref.append(item)
+                    rsrcmgr.section_header_ref.append(item)
                 if not rsrcmgr.abstract_ref and abstract_header_pattern.match(item.get_text()) and\
                         'extended' not in item.get_text().lower():
                     rsrcmgr.abstract_ref = item
+                    rsrcmgr.section_header_ref.append(item)
                 if ref_header_pattern.match(item.get_text()):
-                    rsrcmgr.ref_ref.append(item)
+                    rsrcmgr.ref_ref = item
+                    rsrcmgr.section_header_ref.append(item)
                 if figure_pattern.match(item.get_text()):
                     rsrcmgr.figure_ref.append(item)
                 if table_pattern.match(item.get_text()):
@@ -120,6 +122,7 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
         interpreter = PDFPageInterpreter(self.rsrcmgr, analyzer)
         for page in PDFPage.create_pages(document):
             interpreter.process_page(page)
+        self.rsrcmgr.post_process()
         return
 
     def begin_page(self, page, ctm):
@@ -136,7 +139,8 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
     def receive_layout(self, ltpage):
         def render(item, parent, level):
             if not isinstance(item, LTCharExtended) and not isinstance(item, LTAnno):
-                print(f'{"".join([" "] * level)} -> {item.__class__.__name__} {item.y1 if isinstance(item, LTTextLineHorizontalExtended) else ""}')
+                if parent.__class__.__name__ == 'LTTextBoxHorizontal' or isinstance(parent, LTPageExtended):
+                    print(f'{"".join([" "] * level)} -> {item.__class__.__name__} {item.y1 if isinstance(item, LTTextLineHorizontalExtended) else ""}')
             if isinstance(item, LTTextLineHorizontalExtended):
                 for child in item:
                     self.write_text(child.get_text())
@@ -157,17 +161,33 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
 class PaperResourceManager(PDFResourceManager):
     def __init__(self):
         super().__init__()
-        self.intro_ref = []
-        self.background_ref = []
+        self.section_header_ref = []
         self.text_ref = []
         self.figure_ref = []
         self.abstract_ref = None
         self.table_ref = []
-        self.ref_ref = []
+        self.ref_ref = None
         self.top_margin_ref = None
         self.left_margin = 612
         self.right_margin = 0
-        self.smallest_ref = []
         self.after_title = False
         self.after_abstract = False
         self.after_ref = False
+        self.section_header_font = None
+        self.section_header_font_size = 0
+
+    def post_process(self):
+        # figure out section header fonts
+        font_freq = {}
+        key = None
+        for item in self.section_header_ref:
+            key = (item.font, item.fontsize)
+            if key not in font_freq:
+                font_freq[key] = 0
+            font_freq[key] += 1
+        if key:
+            max_key = key
+            for k in font_freq.keys():
+                if font_freq[k] > font_freq[max_key]:
+                    max_key = k
+            self.section_header_font, self.section_header_font_size = max_key
