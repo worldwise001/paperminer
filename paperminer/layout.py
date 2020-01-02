@@ -118,6 +118,22 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
             self.font = self._objs[0].font
             self.fontsize = self._objs[0].fontsize
 
+    @property
+    def left_margin(self):
+        left_margin = 612
+        for item in self:
+            if isinstance(item, LTCharExtended) and item.x0 < left_margin:
+                left_margin = item.x0
+        return left_margin
+
+    @property
+    def right_margin(self):
+        right_margin = 0
+        for item in self:
+            if isinstance(item, LTCharExtended) and item.x1 > right_margin:
+                right_margin = item.x0
+        return right_margin
+
 
 class LTPageHeader(LTTextContainer):
     def __init__(self, word_margin):
