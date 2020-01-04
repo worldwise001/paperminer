@@ -7,7 +7,7 @@ from pdfminer.pdffont import PDFFont
 from pdfminer.pdfinterp import PDFResourceManager, PDFGraphicState
 from pdfminer.utils import bbox2str, Plane, uniq
 
-from paperminer.converter import PaperResourceManager
+from paperminer import PaperResourceManager, get_most_popular
 
 
 class LTLayoutContainerExtended(LTLayoutContainer):
@@ -102,6 +102,8 @@ class LTLayoutContainerExtended(LTLayoutContainer):
                         self.rsrcmgr.after_title = True
                     elif not self.rsrcmgr.after_abstract and klass == LTSectionHeader:
                         self.rsrcmgr.after_abstract = True
+                    elif klass == LTSectionHeader and 'references' in line.get_text().lower():
+                        self.rsrcmgr.after_ref = True
                     box = klass()
             else:
                 box = LTTextBoxVertical()
@@ -170,19 +172,17 @@ class LTPageExtended(LTLayoutContainerExtended):
                  bbox2str(self.bbox), self.rotate))
 
 
+class LTColumn(LTLayoutContainerExtended):
+    pass
+
+
 class LTTextLineHorizontalExtended(LTTextLineHorizontal):
     def __init__(self,
                  word_margin: float) -> None:
         super().__init__(word_margin)
-        self.fontsize = 0
-        self.font = None
 
-    def add(self,
-            obj: Union[LTItem, LTText]) -> None:
+    def add(self, obj: Union[LTItem, LTText]) -> None:
         super().add(obj)
-        if len(self._objs) == 1:
-            self.font = self._objs[0].font
-            self.fontsize = self._objs[0].fontsize
 
     @property
     def left_margin(self) -> float:
@@ -199,6 +199,26 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
             if isinstance(item, LTCharExtended) and item.x1 > right_margin:
                 right_margin = item.x0
         return right_margin
+
+    @property
+    def fontsize(self) -> float:
+        font_list = [(item.font, item.fontsize) for item in self if isinstance(item, LTCharExtended)]
+        _, fontsize = get_most_popular(font_list)
+        return fontsize
+
+    @property
+    def font(self) -> PDFFont:
+        font_list = [(item.font, item.fontsize) for item in self if isinstance(item, LTCharExtended)]
+        font, _ = get_most_popular(font_list)
+        return font
+
+    def is_font_similar(self, other_line: 'LTTextLineHorizontalExtended') -> bool:
+        font_list1 = [item.fontsize for item in self if isinstance(item, LTCharExtended)]
+        font_list2 = [item.fontsize for item in other_line if isinstance(item, LTCharExtended)]
+        for entry in font_list1:
+            if entry in font_list2:
+                return True
+        return False
 
     def maybe_compare(self,
                       other_line: LTText) -> bool:
@@ -223,6 +243,16 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
                 return LTSectionHeader
             if not rsrcmgr.after_abstract:
                 return LTAuthor
+            if self.font == rsrcmgr.body_font and self.fontsize == rsrcmgr.body_font_size:
+                return LTSectionBody
+            if self.fontsize == rsrcmgr.tiny_font_size:
+                if rsrcmgr.after_ref:
+                    return LTCitationBox
+                else:
+                    return LTFooter
+            # if rsrcmgr.after_ref and ref_pattern.match(self.get_text()):
+            #    return LTCitation
+
         return LTTextBoxHorizontal
 
     def find_neighbors_with_rsrcmgr(self,
@@ -236,10 +266,16 @@ class LTTextLineHorizontalExtended(LTTextLineHorizontal):
                 if (isinstance(obj, LTTextLineHorizontalExtended) and
                     classification == obj.maybe_classify(rsrcmgr) and
                     (
-                        (abs(obj.height-self.height) < d and (abs(obj.x0-self.x0) < d or abs(obj.x1-self.x1) < d)) or
-                        classification == LTAuthor or
-                        classification == LTPageMargin
+                        (
+                            abs(obj.height-self.height) < d and
+                            self.is_font_similar(obj) and
+                            self.is_x_similar(obj, d)
+                        ) or
+                        classification in [LTAuthor, LTPageMargin, LTCitationBox, LTFooter]
                 ))]
+
+    def is_x_similar(self, obj: LTTextBox, d: float) -> bool:
+        return abs(obj.x0 - self.x0) < d or abs(obj.x1 - self.x1) < d
 
 
 class LTPageMargin(LTTextBoxHorizontal):
@@ -262,7 +298,15 @@ class LTSectionBody(LTTextBoxHorizontal):
     pass
 
 
-class LTCitation(LTTextContainer):
+class LTFooter(LTTextBoxHorizontal):
+    pass
+
+
+class LTCitationBox(LTTextBoxHorizontal):
+    pass
+
+
+class LTCitation(LTTextBox):
     def __init__(self) -> None:
         super().__init__()
         self.ref = 0
@@ -272,7 +316,6 @@ class LTCitation(LTTextContainer):
         self.date = '0000'
         self.link = ''
         return
-
     pass
 
 

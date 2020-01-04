@@ -1,63 +1,24 @@
 import logging
-import re
 import sys
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple, Any
 
 import six
 from pdfminer import utils
 from pdfminer.converter import PDFLayoutAnalyzer
-from pdfminer.layout import LAParams, LTAnno, LTContainer, LTPage, LTItem, LTTextBox
+from pdfminer.layout import LAParams, LTAnno, LTContainer, LTPage, LTItem, LTLine
 from pdfminer.pdfcolor import PDFColorSpace
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdffont import PDFUnicodeNotDefined, PDFFont
-from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager, PDFGraphicState
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFGraphicState
 from pdfminer.pdfpage import PDFPage
 from pdfminer.utils import apply_matrix_pt
 
-from paperminer.layout import LTPageExtended, LTCharExtended, LTTextLineHorizontalExtended
+from paperminer import PaperResourceManager, intro_header_pattern, ref_header_pattern, abstract_header_pattern, \
+    background_header_pattern, figure_pattern, table_pattern
+from paperminer.layout import LTPageExtended, LTCharExtended, LTTextLineHorizontalExtended, LTPageMargin, LTFooter, \
+    LTCitationBox, LTAuthor, LTTitle
 
 log = logging.getLogger(__name__)
-intro_header_pattern = re.compile('[\\d.]* ?introduction( .+)?', re.IGNORECASE)
-ref_header_pattern = re.compile('[\\d.]* ?reference( .+)?', re.IGNORECASE)
-abstract_header_pattern = re.compile('[\\d.]* ?abstract( .+)?', re.IGNORECASE)
-background_header_pattern = re.compile('[\\d.]* ?background( .+)?', re.IGNORECASE)
-figure_pattern = re.compile('figure( \\w\\d*)?: ?.*', re.IGNORECASE)
-table_pattern = re.compile('table( \\w\\d*)?: ?.*', re.IGNORECASE)
-
-
-class PaperResourceManager(PDFResourceManager):
-    def __init__(self) -> None:
-        super().__init__()
-        self.section_header_ref: List[LTTextBox] = []
-        self.text_ref: List[LTTextBox] = []
-        self.figure_ref: List[LTTextBox] = []
-        self.abstract_ref: Optional[LTTextBox] = None
-        self.table_ref: List[LTTextBox] = []
-        self.ref_ref: Optional[LTTextBox] = None
-        self.top_margin_ref: Optional[LTTextBox] = None
-        self.left_margin: float = 612
-        self.right_margin: float = 0
-        self.after_title = False
-        self.after_abstract = False
-        self.after_ref = False
-        self.section_header_font: Optional[PDFFont] = None
-        self.section_header_font_size = 0
-
-    def post_process(self) -> None:
-        # figure out section header fonts
-        font_freq: Dict[Tuple[PDFFont, float], int] = {}
-        key = None
-        for item in self.section_header_ref:
-            key = (item.font, item.fontsize)
-            if key not in font_freq:
-                font_freq[key] = 0
-            font_freq[key] += 1
-        if key:
-            max_key = key
-            for k in font_freq.keys():
-                if font_freq[k] > font_freq[max_key]:
-                    max_key = k
-            self.section_header_font, self.section_header_font_size = max_key
 
 
 class BasePaperAnalyzer(PDFLayoutAnalyzer):
@@ -125,7 +86,9 @@ class ExtendedPaperAnalyzer(BasePaperAnalyzer):
     # So that is 0 - [198-396] pts
     def receive_layout(self, ltpage: LTPageExtended) -> None:
         def render(item: LTItem, parent: Optional[LTItem], level: int, rsrcmgr: PaperResourceManager) -> None:
-            if isinstance(item, LTTextLineHorizontalExtended):
+            if isinstance(item, LTCharExtended):
+                rsrcmgr.tally(item.font, item.fontsize)
+            elif isinstance(item, LTTextLineHorizontalExtended):
                 if not rsrcmgr.top_margin_ref:
                     rsrcmgr.top_margin_ref = item
                 if item.left_margin < rsrcmgr.left_margin:
@@ -136,7 +99,7 @@ class ExtendedPaperAnalyzer(BasePaperAnalyzer):
                     rsrcmgr.section_header_ref.append(item)
                 if background_header_pattern.match(item.get_text()):
                     rsrcmgr.section_header_ref.append(item)
-                if not rsrcmgr.abstract_ref and abstract_header_pattern.match(item.get_text()) and\
+                if not rsrcmgr.abstract_ref and abstract_header_pattern.match(item.get_text()) and \
                         'extended' not in item.get_text().lower():
                     rsrcmgr.abstract_ref = item
                     rsrcmgr.section_header_ref.append(item)
@@ -147,7 +110,7 @@ class ExtendedPaperAnalyzer(BasePaperAnalyzer):
                     rsrcmgr.figure_ref.append(item)
                 if table_pattern.match(item.get_text()):
                     rsrcmgr.table_ref.append(item)
-            elif isinstance(item, LTContainer):
+            if isinstance(item, LTContainer):
                 for child in item:
                     render(child, item, level + 1, rsrcmgr)
 
@@ -179,13 +142,20 @@ class PaperToTextConverter(ExtendedPaperAnalyzer):
 
     def receive_layout(self, ltpage: LTPage) -> None:
         def render(item: LTItem, parent: Optional[LTItem], level: int) -> None:
+            if (isinstance(item, LTPageMargin) or
+                    isinstance(item, LTFooter) or
+                    isinstance(item, LTCitationBox) or
+                    isinstance(item, LTLine) or
+                    isinstance(item, LTCitationBox) or
+                    isinstance(item, LTTitle) or
+                    isinstance(item, LTAuthor)):
+                return
             if not isinstance(item, LTCharExtended) and not isinstance(item, LTAnno):
                 if parent.__class__.__name__ == 'LTTextBoxHorizontal' or isinstance(parent, LTPageExtended):
-                    print(f'{"".join([" "] * level)} -> {item.__class__.__name__} '
-                          f'{item.y1 if isinstance(item, LTTextLineHorizontalExtended) else ""}')
+                    if not isinstance(item, LTTextLineHorizontalExtended):
+                        print(f'{"".join([" "] * level)} -> {item.__class__.__name__}')
             if isinstance(item, LTTextLineHorizontalExtended):
-                for child in item:
-                    self.write_text(child.get_text())
+                self.write_text(item.get_text())
             elif isinstance(item, LTContainer):
                 for child in item:
                     render(child, item, level + 1)
