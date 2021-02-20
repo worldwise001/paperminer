@@ -3,7 +3,7 @@ pdfminer.six==20191110
 attrs==19.3.0
 certifi==2019.11.28
 cryptography==3.2
-httplib2==0.15.0
+httplib2==0.19.0
 hyperlink==19.0.0
 idna==2.8
 incremental==17.5.0
